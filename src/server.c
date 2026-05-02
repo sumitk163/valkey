@@ -2340,6 +2340,10 @@ void initServerConfig(void) {
     server.aof_last_fsync = time(NULL) * 1000;
     server.aof_cur_timestamp = 0;
     server.aof_integrity_check = 0;
+    server.aof_replication_restore = 0;
+    memset(server.aof_last_replid, 0, sizeof(server.aof_last_replid));
+    memset(server.aof_rewrite_base_replid, 0, sizeof(server.aof_rewrite_base_replid));
+    server.aof_rewrite_base_reploff = -1;
     server.aof_running_checksum = 0;
     server.aof_integrity_chain_active = 0;
     atomic_store_explicit(&server.aof_bio_fsync_status, C_OK, memory_order_relaxed);

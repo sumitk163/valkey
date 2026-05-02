@@ -1715,6 +1715,8 @@ typedef struct {
     long long curr_incr_file_seq; /* The sequence number used by the current INCR file. */
     int dirty;                    /* 1 Indicates that the aofManifest in the memory is inconsistent with
                                      disk, we need to persist it immediately. */
+    char repl_id[CONFIG_RUN_ID_SIZE + 1]; /* Replication ID */
+    long long repl_offset;                /* Replication offset */
 } aofManifest;
 
 /*-----------------------------------------------------------------------------
@@ -2031,6 +2033,10 @@ struct valkeyServer {
     sds aof_retry_buf;                  /* Buffer to store data that failed to be written fully during a partial write. */
     int aof_integrity_chain_active;     /* 1 if we are currently in an active AOF integrity chain.
                                            This ensures we expect headers even if the checksum is 0. */
+    int aof_replication_restore;        /* Restore replication state from AOF */
+    char aof_last_replid[CONFIG_RUN_ID_SIZE + 1]; /* Last replid written to AOF */
+    char aof_rewrite_base_replid[CONFIG_RUN_ID_SIZE + 1]; /* Replid at the start of AOFRW */
+    long long aof_rewrite_base_reploff; /* Offset at the start of AOFRW */
     int aof_lastbgrewrite_status;       /* C_OK or C_ERR */
     unsigned long aof_delayed_fsync;    /* delayed AOF fsync() counter */
     int aof_rewrite_incremental_fsync;  /* fsync incrementally while aof rewriting? */

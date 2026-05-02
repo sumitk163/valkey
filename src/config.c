@@ -2670,6 +2670,12 @@ static int updateAofIntegrityCheck(const char **err) {
     return 1;
 }
 
+static int updateAofReplicationRestore(const char **err) {
+    UNUSED(err);
+    serverLog(LL_NOTICE, "AOF replication restore %s", server.aof_replication_restore ? "enabled" : "disabled");
+    return 1;
+}
+
 static int updateExtendedRedisCompat(const char **err) {
     UNUSED(err);
     updateSharedObjectsWithCompat();
@@ -3326,6 +3332,7 @@ standardConfig static_configs[] = {
     createBoolConfig("aof-use-rdb-preamble", NULL, MODIFIABLE_CONFIG, server.aof_use_rdb_preamble, 1, NULL, NULL),
     createBoolConfig("aof-timestamp-enabled", NULL, MODIFIABLE_CONFIG, server.aof_timestamp_enabled, 0, NULL, NULL),
     createBoolConfig("aof-integrity-check", NULL, MODIFIABLE_CONFIG, server.aof_integrity_check, 0, NULL, updateAofIntegrityCheck),
+    createBoolConfig("aof-replication-restore", NULL, MODIFIABLE_CONFIG, server.aof_replication_restore, 0, NULL, updateAofReplicationRestore),
     createBoolConfig("cluster-replica-no-failover", "cluster-slave-no-failover", MODIFIABLE_CONFIG, server.cluster_replica_no_failover, 0, NULL, updateClusterFlags), /* Failover by default. */
     createBoolConfig("replica-lazy-flush", "slave-lazy-flush", MODIFIABLE_CONFIG, server.repl_replica_lazy_flush, 1, NULL, NULL),
     createBoolConfig("replica-serve-stale-data", "slave-serve-stale-data", MODIFIABLE_CONFIG, server.repl_serve_stale_data, 1, NULL, NULL),
