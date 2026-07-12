@@ -32,7 +32,7 @@
 #include "rio.h"
 #include "functions.h"
 #include "module.h"
-#include "crc64.h"
+#include "crc32.h"
 
 #include <signal.h>
 #include <fcntl.h>
@@ -226,7 +226,7 @@ sds getAofManifestAsString(aofManifest *am) {
 
     if (server.aof_integrity_check) {
         /* Calculate checksum of manifest content */
-        uint64_t checksum = crc64(0, (unsigned char *)buf, sdslen(buf));
+        uint64_t checksum = crc32(0, (unsigned char *)buf, sdslen(buf));
 
         /* Append checksum line */
         buf = sdscatprintf(buf, "# manifest-checksum: %llu\n", (unsigned long long)checksum);
@@ -325,7 +325,7 @@ aofManifest *aofLoadManifestFromFile(sds am_filepath) {
         }
 
         if (server.aof_integrity_check) {
-            calculated_checksum = crc64(calculated_checksum, (unsigned char *)buf, strlen(buf));
+            calculated_checksum = crc32((uint32_t)calculated_checksum, (unsigned char *)buf, strlen(buf));
         }
 
         /* Skip comments lines */
@@ -1374,8 +1374,8 @@ void flushAppendOnlyFile(int force) {
         *p = '\0';
         int prefix_len = p - hdr_prefix;
 
-        checksum = crc64(server.aof_running_checksum, (unsigned char *)hdr_prefix, prefix_len);
-        checksum = crc64(checksum, (unsigned char *)server.aof_buf, sdslen(server.aof_buf));
+        checksum = crc32((uint32_t)server.aof_running_checksum, (unsigned char *)hdr_prefix, prefix_len);
+        checksum = crc32((uint32_t)checksum, (unsigned char *)server.aof_buf, sdslen(server.aof_buf));
 
         char *hp = hdr;
         memcpy(hp, hdr_prefix, prefix_len);
@@ -1812,7 +1812,7 @@ int loadSingleAppendOnlyFile(char *filename) {
                     serverLog(LL_WARNING, "AOF integrity header in %s lacks a checksum", filename);
                     goto fmterr;
                 }
-                uint64_t computed_checksum = crc64(server.aof_running_checksum, (unsigned char *)buf, checksum_tag - buf);
+                uint64_t computed_checksum = crc32((uint32_t)server.aof_running_checksum, (unsigned char *)buf, checksum_tag - buf);
                 off_t current_pos = ftello(fp);
 
                 size_t remaining = hdr_len;
@@ -1824,7 +1824,7 @@ int loadSingleAppendOnlyFile(char *filename) {
                                   filename, remaining);
                         goto readerr;
                     }
-                    computed_checksum = crc64(computed_checksum, check_buf, to_read);
+                    computed_checksum = crc32((uint32_t)computed_checksum, check_buf, to_read);
                     remaining -= to_read;
                 }
 

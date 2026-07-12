@@ -29,7 +29,7 @@
  */
 
 #include "server.h"
-#include "crc64.h"
+#include "crc32.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -213,7 +213,7 @@ int processAnnotations(FILE *fp, char *filename, int last_file) {
             printf("%s\n", error);
             exit(1);
         }
-        uint64_t computed_checksum = crc64(expected_running_checksum, (unsigned char *)buf, checksum_tag - buf);
+        uint64_t computed_checksum = crc32((uint32_t)expected_running_checksum, (unsigned char *)buf, checksum_tag - buf);
         off_t current_pos = ftello(fp);
 
         size_t remaining = hdr_len;
@@ -225,7 +225,7 @@ int processAnnotations(FILE *fp, char *filename, int last_file) {
                 printf("%s\n", error);
                 exit(1);
             }
-            computed_checksum = crc64(computed_checksum, check_buf, to_read);
+            computed_checksum = crc32((uint32_t)computed_checksum, check_buf, to_read);
             remaining -= to_read;
         }
 
