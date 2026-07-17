@@ -101,7 +101,9 @@ void aof_background_fsync_and_close(int fd);
 
 /* Create an empty aofInfo. */
 aofInfo *aofInfoCreate(void) {
-    return zcalloc(sizeof(aofInfo));
+    aofInfo *ai = zcalloc(sizeof(aofInfo));
+    ai->last_repl_offset = -1;
+    return ai;
 }
 
 /* Free the aofInfo structure (pointed to by ai) and its embedded file_name. */
@@ -119,6 +121,8 @@ aofInfo *aofInfoDup(aofInfo *orig) {
     ai->file_seq = orig->file_seq;
     ai->file_type = orig->file_type;
     ai->last_checksum = orig->last_checksum;
+    memcpy(ai->last_repl_id, orig->last_repl_id, sizeof(ai->last_repl_id));
+    ai->last_repl_offset = orig->last_repl_offset;
     return ai;
 }
 
@@ -136,6 +140,15 @@ sds aofInfoFormat(sds buf, aofInfo *ai) {
 
     if (server.aof_integrity_check) {
         ret = sdscatprintf(ret, " %s %llu", AOF_MANIFEST_KEY_FILE_CHECKSUM, (unsigned long long)ai->last_checksum);
+    }
+
+    if (server.aof_replication_restore && ai->last_repl_id[0] != '\0' && ai->last_repl_offset != -1) {
+        char offbuf[LONG_STR_SIZE];
+        int offlen = ll2string(offbuf, sizeof(offbuf), ai->last_repl_offset);
+        ret = sdscatlen(ret, " " AOF_MANIFEST_KEY_REPL_ID " ", sizeof(" " AOF_MANIFEST_KEY_REPL_ID " ") - 1);
+        ret = sdscatlen(ret, ai->last_repl_id, strlen(ai->last_repl_id));
+        ret = sdscatlen(ret, " " AOF_MANIFEST_KEY_REPL_OFF " ", sizeof(" " AOF_MANIFEST_KEY_REPL_OFF " ") - 1);
+        ret = sdscatlen(ret, offbuf, offlen);
     }
 
     ret = sdscatlen(ret, "\n", 1);
@@ -165,7 +178,6 @@ aofManifest *aofManifestCreate(void) {
     listSetDupMethod(am->incr_aof_list, aofListDup);
     listSetFreeMethod(am->history_aof_list, aofListFree);
     listSetDupMethod(am->history_aof_list, aofListDup);
-    am->repl_offset = -1;
     return am;
 }
 
@@ -190,8 +202,9 @@ sds getTempAofManifestFileName(void) {
  * The string is multiple lines separated by '\n', and each line represents
  * an AOF file.
  *
- * Each line is space delimited and contains 6 fields (or 8 fields if integrity check is enabled), as follows:
- * "file" [filename] "seq" [sequence] "type" [type] ["checksum" [checksum]]
+ * Each line is space delimited and contains 6 fields (or more if integrity check
+ * or replication restore is enabled), as follows:
+ * "file" [filename] "seq" [sequence] "type" [type] ["checksum" [checksum]] ["replid" [replid] "reploff" [reploff]]
  *
  * Where "file", "seq" and "type" are keywords that describe the next value,
  * [filename] and [sequence] describe file name and order, and [type] is one
@@ -225,17 +238,6 @@ sds getAofManifestAsString(aofManifest *am) {
     while ((ln = listNext(&li)) != NULL) {
         aofInfo *ai = (aofInfo *)ln->value;
         buf = aofInfoFormat(buf, ai);
-    }
-
-    /* 4. Add replication state if valid. */
-    if (am->repl_id[0] != '\0' && am->repl_offset != -1) {
-        char offbuf[LONG_STR_SIZE];
-        int offlen = ll2string(offbuf, sizeof(offbuf), am->repl_offset);
-        buf = sdscatlen(buf, AOF_MANIFEST_KEY_REPL_ID " ", sizeof(AOF_MANIFEST_KEY_REPL_ID " ") - 1);
-        buf = sdscatlen(buf, am->repl_id, strlen(am->repl_id));
-        buf = sdscatlen(buf, " " AOF_MANIFEST_KEY_REPL_OFF " ", sizeof(" " AOF_MANIFEST_KEY_REPL_OFF " ") - 1);
-        buf = sdscatlen(buf, offbuf, offlen);
-        buf = sdscatlen(buf, "\n", 1);
     }
 
     if (server.aof_integrity_check) {
@@ -382,37 +384,24 @@ aofManifest *aofLoadManifestFromFile(sds am_filepath) {
                 } else if (!strcasecmp(argv[i], AOF_MANIFEST_KEY_FILE_CHECKSUM)) {
                     ai->last_checksum = strtoull(argv[i + 1], NULL, 10);
                     saw_file_checksum = 1;
-                }
-            }
-            if (!ai->file_name || !ai->file_seq || !ai->file_type) {
-                err = "Invalid AOF manifest file format";
-                goto loaderr;
-            }
-        } else if (!strcasecmp(argv[0], AOF_MANIFEST_KEY_REPL_ID)) {
-            if (argc < 4) {
-                err = "Invalid AOF manifest file format";
-                goto loaderr;
-            }
-            for (int i = 0; i < argc; i += 2) {
-                if (!strcasecmp(argv[i], AOF_MANIFEST_KEY_REPL_ID)) {
+                } else if (!strcasecmp(argv[i], AOF_MANIFEST_KEY_REPL_ID)) {
                     sds replid = sdsnew(argv[i + 1]);
                     if (sdslen(replid) != CONFIG_RUN_ID_SIZE) {
                         sdsfree(replid);
                         err = "Invalid replication ID length in manifest";
                         goto loaderr;
                     }
-                    memcpy(am->repl_id, replid, CONFIG_RUN_ID_SIZE);
-                    am->repl_id[CONFIG_RUN_ID_SIZE] = '\0';
+                    memcpy(ai->last_repl_id, replid, CONFIG_RUN_ID_SIZE);
+                    ai->last_repl_id[CONFIG_RUN_ID_SIZE] = '\0';
                     sdsfree(replid);
                 } else if (!strcasecmp(argv[i], AOF_MANIFEST_KEY_REPL_OFF)) {
-                    am->repl_offset = atoll(argv[i + 1]);
+                    ai->last_repl_offset = atoll(argv[i + 1]);
                 }
             }
-            sdsfreesplitres(argv, argc);
-            argv = NULL;
-            sdsfree(line);
-            line = NULL;
-            continue;
+            if (!ai->file_name || !ai->file_seq || !ai->file_type) {
+                err = "Invalid AOF manifest file format";
+                goto loaderr;
+            }
         } else {
             err = "Invalid AOF manifest file format";
             goto loaderr;
@@ -485,8 +474,6 @@ aofManifest *aofManifestDup(aofManifest *orig) {
     am->curr_base_file_seq = orig->curr_base_file_seq;
     am->curr_incr_file_seq = orig->curr_incr_file_seq;
     am->dirty = orig->dirty;
-    memcpy(am->repl_id, orig->repl_id, sizeof(am->repl_id));
-    am->repl_offset = orig->repl_offset;
 
     if (orig->base_aof_info) {
         am->base_aof_info = aofInfoDup(orig->base_aof_info);
@@ -880,12 +867,16 @@ int openNewIncrAofForAppend(void) {
         /* Dup a temp aof_manifest to modify. */
         temp_am = aofManifestDup(server.aof_manifest);
 
-        /* Update the checksum of the current INCR file before opening a new one. */
-        if (server.aof_integrity_check) {
-            listNode *last_node = listLast(temp_am->incr_aof_list);
-            if (last_node) {
-                aofInfo *last_ai = listNodeValue(last_node);
+        /* Update the checksum and replication state of the current INCR file before opening a new one. */
+        listNode *last_node = listLast(temp_am->incr_aof_list);
+        if (last_node) {
+            aofInfo *last_ai = listNodeValue(last_node);
+            if (server.aof_integrity_check) {
                 last_ai->last_checksum = server.aof_running_checksum;
+            }
+            if (server.aof_replication_restore) {
+                memcpy(last_ai->last_repl_id, server.replid, sizeof(last_ai->last_repl_id));
+                last_ai->last_repl_offset = iAmPrimary() ? server.primary_repl_offset : replicationGetReplicaOffset();
             }
         }
 
@@ -1134,14 +1125,13 @@ int restartAOFWithSyncRdb(void) {
     serverAssert(server.aof_manifest != NULL);
     temp_am = aofManifestDup(server.aof_manifest);
 
-    if (server.aof_replication_restore) {
-        memcpy(temp_am->repl_id, server.replid, sizeof(temp_am->repl_id));
-        temp_am->repl_offset = server.primary_repl_offset;
-        temp_am->dirty = 1;
-    }
-
     new_base_filename = getNewBaseFileNameAndMarkPreAsHistory(temp_am, server.aof_use_rdb_preamble);
     serverAssert(new_base_filename != NULL);
+    if (server.aof_replication_restore && temp_am->base_aof_info) {
+        memcpy(temp_am->base_aof_info->last_repl_id, server.replid, sizeof(temp_am->base_aof_info->last_repl_id));
+        temp_am->base_aof_info->last_repl_offset = server.primary_repl_offset;
+        temp_am->dirty = 1;
+    }
     new_base_filepath = makePath(server.aof_dirname, new_base_filename);
 
     if (rename(server.rdb_filename, new_base_filepath) == -1) {
@@ -1747,7 +1737,6 @@ void feedAppendOnlyFile(int dictid, robj **argv, int argc) {
      * of re-entering the event loop, so before the client will get a
      * positive reply about the operation performed. */
     if (server.aof_state == AOF_ON || (server.aof_state == AOF_WAIT_REWRITE && server.child_type == CHILD_TYPE_AOF)) {
-
         server.aof_buf = sdscatlen(server.aof_buf, buf, sdslen(buf));
     }
 
@@ -1899,7 +1888,7 @@ int loadSingleAppendOnlyFile(char *filename, struct client *fakeClient, rdbSaveI
                 if (server.aof_replication_restore) {
                     char *id_ptr = strstr(buf, "replid:");
                     char *off_ptr = strstr(buf, "reploff:");
-                    
+
                     if (id_ptr) {
                         char *val_start = id_ptr + 7;
                         char *val_end = strchr(val_start, ';');
@@ -2136,10 +2125,24 @@ int loadAppendOnlyFiles(aofManifest *am) {
     int total_num, aof_num = 0, last_file;
     struct client *fakeClient = NULL;
     rdbSaveInfo rsi = RDB_SAVE_INFO_INIT;
-    if (server.aof_replication_restore && am->repl_id[0] != '\0' && am->repl_offset != -1) {
-        memcpy(rsi.repl_id, am->repl_id, sizeof(rsi.repl_id));
-        rsi.repl_offset = am->repl_offset;
-        rsi.repl_id_is_set = 1;
+    if (server.aof_replication_restore) {
+        if (am->base_aof_info && am->base_aof_info->last_repl_id[0] != '\0' && am->base_aof_info->last_repl_offset != -1) {
+            memcpy(rsi.repl_id, am->base_aof_info->last_repl_id, sizeof(rsi.repl_id));
+            rsi.repl_offset = am->base_aof_info->last_repl_offset;
+            rsi.repl_id_is_set = 1;
+        } else if (listLength(am->incr_aof_list)) {
+            listNode *ln;
+            listIter li;
+            listRewind(am->incr_aof_list, &li);
+            while ((ln = listNext(&li)) != NULL) {
+                aofInfo *ai = (aofInfo *)ln->value;
+                if (ai->last_repl_id[0] != '\0' && ai->last_repl_offset != -1) {
+                    memcpy(rsi.repl_id, ai->last_repl_id, sizeof(rsi.repl_id));
+                    rsi.repl_offset = ai->last_repl_offset;
+                    rsi.repl_id_is_set = 1;
+                }
+            }
+        }
     }
     int old_aof_state = server.aof_state;
     client *old_cur_client = server.current_client;
@@ -3219,12 +3222,6 @@ void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
         /* Dup a temporary aof_manifest for subsequent modifications. */
         temp_am = aofManifestDup(server.aof_manifest);
 
-        if (server.aof_replication_restore) {
-            memcpy(temp_am->repl_id, server.aof_rewrite_base_replid, sizeof(temp_am->repl_id));
-            temp_am->repl_offset = server.aof_rewrite_base_reploff;
-            temp_am->dirty = 1;
-        }
-
         /* Get a new BASE file name and mark the previous (if we have)
          * as the HISTORY type. */
         sds new_base_filename = getNewBaseFileNameAndMarkPreAsHistory(temp_am, server.aof_rewrite_use_rdb_preamble);
@@ -3284,6 +3281,11 @@ void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
 
         if (server.aof_integrity_check) {
             temp_am->base_aof_info->last_checksum = server.aof_rewrite_base_checksum;
+        }
+        if (server.aof_replication_restore && temp_am->base_aof_info) {
+            memcpy(temp_am->base_aof_info->last_repl_id, server.aof_rewrite_base_replid, sizeof(temp_am->base_aof_info->last_repl_id));
+            temp_am->base_aof_info->last_repl_offset = server.aof_rewrite_base_reploff;
+            temp_am->dirty = 1;
         }
 
         /* Persist our modifications. */

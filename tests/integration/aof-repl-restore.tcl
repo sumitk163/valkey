@@ -158,4 +158,21 @@ tags {"aof-repl-restore external:skip"} {
             assert_no_match "*reploff:*" $content
         }
     }
+
+    test "AOF manifest contains per-file replid and reploff when replication restore is enabled" {
+        set sp [tmpdir server.aof-repl-restore-manifest]
+        start_server [list overrides [list dir $sp appendonly yes appendfsync always aof-replication-restore yes aof-use-rdb-preamble yes]] {
+            set rd [valkey [srv host] [srv port] 0 $::tls]
+            $rd set foo bar
+            $rd bgrewriteaof
+            waitForBgrewriteaof $rd
+
+            set manifest_path [file join [dict get [srv config] dir] "appendonlydir" "appendonly.aof.manifest"]
+            set fp [open $manifest_path r]
+            set content [read $fp]
+            close $fp
+
+            assert_match "*file * seq * type b *replid * reploff *" $content
+        }
+    }
 }

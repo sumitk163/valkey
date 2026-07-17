@@ -1699,10 +1699,12 @@ typedef enum {
 } aof_file_type;
 
 typedef struct {
-    sds file_name;           /* file name */
-    long long file_seq;      /* file sequence */
-    aof_file_type file_type; /* file type */
-    uint64_t last_checksum;  /* The last checksum of this AOF file. */
+    sds file_name;                             /* file name */
+    long long file_seq;                        /* file sequence */
+    aof_file_type file_type;                   /* file type */
+    uint64_t last_checksum;                    /* The last checksum of this AOF file. */
+    char last_repl_id[CONFIG_RUN_ID_SIZE + 1]; /* Replication ID */
+    long long last_repl_offset;                /* Replication offset */
 } aofInfo;
 
 typedef struct {
@@ -1715,8 +1717,6 @@ typedef struct {
     long long curr_incr_file_seq; /* The sequence number used by the current INCR file. */
     int dirty;                    /* 1 Indicates that the aofManifest in the memory is inconsistent with
                                      disk, we need to persist it immediately. */
-    char repl_id[CONFIG_RUN_ID_SIZE + 1]; /* Replication ID */
-    long long repl_offset;                /* Replication offset */
 } aofManifest;
 
 /*-----------------------------------------------------------------------------
@@ -2003,54 +2003,54 @@ struct valkeyServer {
     unsigned int max_new_conns_per_cycle;     /* The maximum number of tcp connections that will be accepted during each
                                                  invocation of the event loop. */
     /* AOF persistence */
-    int aof_enabled;                    /* AOF configuration */
-    int aof_state;                      /* AOF_(ON|OFF|WAIT_REWRITE) */
-    int aof_fsync;                      /* Kind of fsync() policy */
-    char *aof_filename;                 /* Basename of the AOF file and manifest file */
-    char *aof_dirname;                  /* Name of the AOF directory */
-    int aof_no_fsync_on_rewrite;        /* Don't fsync if a rewrite is in prog. */
-    int aof_rewrite_perc;               /* Rewrite AOF if % growth is > M and... */
-    off_t aof_rewrite_min_size;         /* the AOF file is at least N bytes. */
-    off_t aof_rewrite_base_size;        /* AOF size on latest startup or rewrite. */
-    off_t aof_current_size;             /* AOF current size (Including BASE + INCRs). */
-    off_t aof_last_incr_size;           /* The size of the latest incr AOF. */
-    off_t aof_last_incr_fsync_offset;   /* AOF offset which is already requested to be synced to disk.
-                                         * Compare with the aof_last_incr_size. */
-    int aof_flush_sleep;                /* Micros to sleep before flush. (used by tests) */
-    int aof_rewrite_scheduled;          /* Rewrite once BGSAVE terminates. */
-    sds aof_buf;                        /* AOF buffer, written before entering the event loop */
-    int aof_fd;                         /* File descriptor of currently selected AOF file */
-    int aof_selected_db;                /* Currently selected DB in AOF */
-    mstime_t aof_flush_postponed_start; /* mstime of postponed AOF flush */
-    mstime_t aof_last_fsync;            /* mstime of last fsync() */
-    time_t aof_rewrite_time_last;       /* Time used by last AOF rewrite run. */
-    time_t aof_rewrite_time_start;      /* Current AOF rewrite start time. */
-    time_t aof_cur_timestamp;           /* Current record timestamp in AOF */
-    int aof_timestamp_enabled;          /* Enable record timestamp in AOF */
-    int aof_integrity_check;            /* Enable metadata integrity check in AOF */
-    uint64_t aof_running_checksum;      /* Current AOF running checksum */
-    uint64_t aof_rewrite_base_checksum; /* AOF running checksum at the start of rewrite */
-    sds aof_retry_buf;                  /* Buffer to store data that failed to be written fully during a partial write. */
-    int aof_integrity_chain_active;     /* 1 if we are currently in an active AOF integrity chain.
-                                           This ensures we expect headers even if the checksum is 0. */
-    int aof_replication_restore;        /* Restore replication state from AOF */
-    char aof_last_replid[CONFIG_RUN_ID_SIZE + 1]; /* Last replid written to AOF */
+    int aof_enabled;                                      /* AOF configuration */
+    int aof_state;                                        /* AOF_(ON|OFF|WAIT_REWRITE) */
+    int aof_fsync;                                        /* Kind of fsync() policy */
+    char *aof_filename;                                   /* Basename of the AOF file and manifest file */
+    char *aof_dirname;                                    /* Name of the AOF directory */
+    int aof_no_fsync_on_rewrite;                          /* Don't fsync if a rewrite is in prog. */
+    int aof_rewrite_perc;                                 /* Rewrite AOF if % growth is > M and... */
+    off_t aof_rewrite_min_size;                           /* the AOF file is at least N bytes. */
+    off_t aof_rewrite_base_size;                          /* AOF size on latest startup or rewrite. */
+    off_t aof_current_size;                               /* AOF current size (Including BASE + INCRs). */
+    off_t aof_last_incr_size;                             /* The size of the latest incr AOF. */
+    off_t aof_last_incr_fsync_offset;                     /* AOF offset which is already requested to be synced to disk.
+                                                           * Compare with the aof_last_incr_size. */
+    int aof_flush_sleep;                                  /* Micros to sleep before flush. (used by tests) */
+    int aof_rewrite_scheduled;                            /* Rewrite once BGSAVE terminates. */
+    sds aof_buf;                                          /* AOF buffer, written before entering the event loop */
+    int aof_fd;                                           /* File descriptor of currently selected AOF file */
+    int aof_selected_db;                                  /* Currently selected DB in AOF */
+    mstime_t aof_flush_postponed_start;                   /* mstime of postponed AOF flush */
+    mstime_t aof_last_fsync;                              /* mstime of last fsync() */
+    time_t aof_rewrite_time_last;                         /* Time used by last AOF rewrite run. */
+    time_t aof_rewrite_time_start;                        /* Current AOF rewrite start time. */
+    time_t aof_cur_timestamp;                             /* Current record timestamp in AOF */
+    int aof_timestamp_enabled;                            /* Enable record timestamp in AOF */
+    int aof_integrity_check;                              /* Enable metadata integrity check in AOF */
+    uint64_t aof_running_checksum;                        /* Current AOF running checksum */
+    uint64_t aof_rewrite_base_checksum;                   /* AOF running checksum at the start of rewrite */
+    sds aof_retry_buf;                                    /* Buffer to store data that failed to be written fully during a partial write. */
+    int aof_integrity_chain_active;                       /* 1 if we are currently in an active AOF integrity chain.
+                                                             This ensures we expect headers even if the checksum is 0. */
+    int aof_replication_restore;                          /* Restore replication state from AOF */
+    char aof_last_replid[CONFIG_RUN_ID_SIZE + 1];         /* Last replid written to AOF */
     char aof_rewrite_base_replid[CONFIG_RUN_ID_SIZE + 1]; /* Replid at the start of AOFRW */
-    long long aof_rewrite_base_reploff; /* Offset at the start of AOFRW */
-    int aof_lastbgrewrite_status;       /* C_OK or C_ERR */
-    unsigned long aof_delayed_fsync;    /* delayed AOF fsync() counter */
-    int aof_rewrite_incremental_fsync;  /* fsync incrementally while aof rewriting? */
-    int rdb_save_incremental_fsync;     /* fsync incrementally while rdb saving? */
-    int aof_last_write_status;          /* C_OK or C_ERR */
-    int aof_last_write_errno;           /* Valid if aof write/fsync status is ERR */
-    int aof_load_truncated;             /* Don't stop on unexpected AOF EOF. */
-    int aof_use_rdb_preamble;           /* Specify base AOF to use RDB encoding on AOF rewrites. */
-    int aof_rewrite_use_rdb_preamble;   /* Base AOF to use RDB encoding on AOF rewrites start. */
-    _Atomic(int) aof_bio_fsync_status;  /* Status of AOF fsync in bio job. */
-    _Atomic(int) aof_bio_fsync_errno;   /* Errno of AOF fsync in bio job. */
-    aofManifest *aof_manifest;          /* Used to track AOFs. */
-    int aof_disable_auto_gc;            /* If disable automatically deleting HISTORY type AOFs?
-                                           default no. (for testings). */
+    long long aof_rewrite_base_reploff;                   /* Offset at the start of AOFRW */
+    int aof_lastbgrewrite_status;                         /* C_OK or C_ERR */
+    unsigned long aof_delayed_fsync;                      /* delayed AOF fsync() counter */
+    int aof_rewrite_incremental_fsync;                    /* fsync incrementally while aof rewriting? */
+    int rdb_save_incremental_fsync;                       /* fsync incrementally while rdb saving? */
+    int aof_last_write_status;                            /* C_OK or C_ERR */
+    int aof_last_write_errno;                             /* Valid if aof write/fsync status is ERR */
+    int aof_load_truncated;                               /* Don't stop on unexpected AOF EOF. */
+    int aof_use_rdb_preamble;                             /* Specify base AOF to use RDB encoding on AOF rewrites. */
+    int aof_rewrite_use_rdb_preamble;                     /* Base AOF to use RDB encoding on AOF rewrites start. */
+    _Atomic(int) aof_bio_fsync_status;                    /* Status of AOF fsync in bio job. */
+    _Atomic(int) aof_bio_fsync_errno;                     /* Errno of AOF fsync in bio job. */
+    aofManifest *aof_manifest;                            /* Used to track AOFs. */
+    int aof_disable_auto_gc;                              /* If disable automatically deleting HISTORY type AOFs?
+                                                             default no. (for testings). */
 
     /* RDB persistence */
     long long dirty;                      /* Changes to DB from the last save */
